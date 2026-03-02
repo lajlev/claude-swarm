@@ -34,7 +34,9 @@ PM_COLOR="#[fg=yellow,bold]"
 AGENT_COLOR="#[fg=cyan]"
 
 # CLAUDE.md instructions injected into each role
-PM_SYSTEM=$(cat <<'PROMPT'
+# Note: using read -r -d '' instead of $(cat <<HEREDOC) to avoid bash 3.2
+# parser bug with parentheses inside heredocs in command substitutions.
+read -r -d '' PM_SYSTEM <<'PROMPT' || true
 You are the PRODUCT MANAGER in a multi-agent Claude Code swarm.
 
 ## Your role
@@ -43,25 +45,32 @@ You are the PRODUCT MANAGER in a multi-agent Claude Code swarm.
 - You assign tasks by telling the human operator which agent should do what.
 - You review work, unblock agents, answer their technical questions, and keep the project on track.
 
+## Task management
+- You have access to Task Master AI via MCP tools. Use it to manage tasks.
+- At the start, use parse_prd or create tasks manually with Task Master.
+- Track all work items as tasks and subtasks.
+- Update task status as agents report progress.
+- Use get_tasks to review overall progress.
+- Use next_task to determine what to assign next.
+
 ## Communication rules
 - ONLY escalate to the human operator when:
-  • A decision has significant business/product impact
-  • There is ambiguity in requirements that you cannot resolve
-  • A task would delete data, cost money, or deploy to production
-  • Two agents have a conflicting approach and you need a tiebreaker
-- For everything else (technical questions, code review, architecture decisions, debugging), handle it yourself.
-- When you DO escalate, prefix your message with "⚠️ ESCALATION:" so the operator can spot it quickly.
+  - A decision has significant business/product impact
+  - There is ambiguity in requirements that you cannot resolve
+  - A task would delete data, cost money, or deploy to production
+  - Two agents have a conflicting approach and you need a tiebreaker
+- For everything else, handle it yourself.
+- When you DO escalate, prefix your message with "ESCALATION:" so the operator can spot it quickly.
 
 ## Workflow
-1. Ask the human for the high-level goal (only once at the start).
-2. Break it into tasks and present a plan.
+1. Ask the human for the high-level goal only once at the start.
+2. Create tasks in Task Master based on the goal.
 3. Tell the operator which task to paste into which agent pane.
 4. Monitor progress — the operator will copy agent output to you if needed.
-5. Iterate until done.
+5. Update task status as work completes. Iterate until done.
 PROMPT
-)
 
-AGENT_SYSTEM=$(cat <<'PROMPT'
+read -r -d '' AGENT_SYSTEM <<'PROMPT' || true
 You are a CODE AGENT in a multi-agent Claude Code swarm.
 
 ## Your role
@@ -70,12 +79,11 @@ You are a CODE AGENT in a multi-agent Claude Code swarm.
 - You report back with a SHORT summary of what you did and any blockers.
 
 ## Rules
-- Stay focused on your assigned task. Don't wander into other agents' work.
+- Stay focused on your assigned task. Do not wander into other agents' work.
 - If you are blocked or confused, clearly state what you need so the PM can unblock you.
 - Prefer small, testable commits.
 - If a task is unclear, ask ONE clarifying question, then proceed with your best judgment.
 PROMPT
-)
 
 # ---------------------------------------------------------------------------
 # Preflight checks
@@ -100,24 +108,23 @@ tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
 SWARM_DIR="$PROJECT_DIR/.claude-swarm"
 mkdir -p "$SWARM_DIR"
 
-cat > "$SWARM_DIR/pm-instructions.md" << 'EOF'
-# Product Manager Instructions
+printf '%s' "$PM_SYSTEM" > "$SWARM_DIR/pm-prompt.txt"
+printf '%s' "$AGENT_SYSTEM" > "$SWARM_DIR/agent-prompt.txt"
 
-You are the Product Manager in a multi-agent swarm. See your system prompt for full details.
-Key reminders:
-- Only escalate critical decisions with "⚠️ ESCALATION:" prefix
-- Break work into tasks for 3 code agents
-- Keep the project moving forward
-EOF
-
-cat > "$SWARM_DIR/agent-instructions.md" << 'EOF'
-# Code Agent Instructions
-
-You are a Code Agent in a multi-agent swarm. See your system prompt for full details.
-Key reminders:
-- Stay focused on your assigned task
-- Report blockers clearly
-- Prefer small, testable changes
+# Generate MCP config for task-master-ai (used by PM only)
+cat > "$SWARM_DIR/mcp.json" << EOF
+{
+  "mcpServers": {
+    "task-master-ai": {
+      "command": "npx",
+      "args": ["-y", "task-master-ai@latest"],
+      "env": {
+        "TASK_MASTER_TOOLS": "core",
+        "PROJECT_ROOT": "$PROJECT_DIR"
+      }
+    }
+  }
+}
 EOF
 
 # ---------------------------------------------------------------------------
@@ -129,42 +136,51 @@ tmux new-session -d -s "$SESSION_NAME" -x 220 -y 55 -c "$PROJECT_DIR"
 # Enable pane titles
 tmux set-option -t "$SESSION_NAME" pane-border-status top
 tmux set-option -t "$SESSION_NAME" pane-border-format \
-    "#{?pane_active,#[reverse],} #{pane_title} #[default]"
+    " #{pane_title} "
+tmux set-option -t "$SESSION_NAME" pane-border-style "fg=colour240"
+tmux set-option -t "$SESSION_NAME" pane-active-border-style "fg=green,bold"
 
 # Split into 4 panes (2x2 grid)
-#   Pane 0: top-left  (PM)
-#   Pane 1: top-right (Agent 1)
-#   Pane 2: bottom-left (Agent 2)
-#   Pane 3: bottom-right (Agent 3)
-tmux split-window -h -t "$SESSION_NAME" -c "$PROJECT_DIR"
-tmux split-window -v -t "$SESSION_NAME:0.0" -c "$PROJECT_DIR"
-tmux split-window -v -t "$SESSION_NAME:0.1" -c "$PROJECT_DIR"
+#   Pane 0: top-left  (PM)         │ Pane 1: top-right (Agent 1)
+#   Pane 2: bottom-left (Agent 2)  │ Pane 3: bottom-right (Agent 3)
+tmux split-window -h -t "$SESSION_NAME:0.0" -c "$PROJECT_DIR"   # left | right
+tmux split-window -v -t "$SESSION_NAME:0.0" -c "$PROJECT_DIR"   # split left top/bottom
+tmux split-window -v -t "$SESSION_NAME:0.1" -c "$PROJECT_DIR"   # split right top/bottom
+tmux select-layout -t "$SESSION_NAME" tiled                       # even 2x2 grid
 
-# Name the panes
-tmux select-pane -t "$SESSION_NAME:0.0" -T "🎯 Product Manager"
-tmux select-pane -t "$SESSION_NAME:0.1" -T "🔧 Code Agent 1"
-tmux select-pane -t "$SESSION_NAME:0.2" -T "🔧 Code Agent 2"
-tmux select-pane -t "$SESSION_NAME:0.3" -T "🔧 Code Agent 3"
+# Name the panes and set visual distinction
+# Prevent applications (claude) from overriding pane titles
+tmux set-option -t "$SESSION_NAME" allow-rename off
+tmux select-pane -t "$SESSION_NAME:0.0" -T ">>> PRODUCT MANAGER <<<"
+tmux select-pane -t "$SESSION_NAME:0.1" -T "Code Agent 1"
+tmux select-pane -t "$SESSION_NAME:0.2" -T "Code Agent 2"
+tmux select-pane -t "$SESSION_NAME:0.3" -T "Code Agent 3"
+
+# Highlight PM pane with a distinct background
+tmux select-pane -t "$SESSION_NAME:0.0" -P 'bg=colour234'
 
 # ---------------------------------------------------------------------------
 # Launch Claude Code in each pane
 # ---------------------------------------------------------------------------
 
-# Product Manager (interactive — this is where you'll interact)
+# Launch claude in each pane, reading system prompts from files at runtime
+# (avoids shell escaping issues with multi-line text in tmux send-keys)
+
+# Product Manager (interactive — with Task Master AI via MCP)
 tmux send-keys -t "$SESSION_NAME:0.0" \
-    "claude --system-prompt '${PM_SYSTEM//\'/\\'\\'}'" Enter
+    "claude --permission-mode acceptEdits --mcp-config '$SWARM_DIR/mcp.json' --system-prompt \"\$(cat '$SWARM_DIR/pm-prompt.txt')\"" Enter
 
 # Agent 1
 tmux send-keys -t "$SESSION_NAME:0.1" \
-    "claude --system-prompt '${AGENT_SYSTEM//\'/\\'\\'}'" Enter
+    "claude --permission-mode acceptEdits --system-prompt \"\$(cat '$SWARM_DIR/agent-prompt.txt')\"" Enter
 
 # Agent 2
 tmux send-keys -t "$SESSION_NAME:0.2" \
-    "claude --system-prompt '${AGENT_SYSTEM//\'/\\'\\'}'" Enter
+    "claude --permission-mode acceptEdits --system-prompt \"\$(cat '$SWARM_DIR/agent-prompt.txt')\"" Enter
 
 # Agent 3
 tmux send-keys -t "$SESSION_NAME:0.3" \
-    "claude --system-prompt '${AGENT_SYSTEM//\'/\\'\\'}'" Enter
+    "claude --permission-mode acceptEdits --system-prompt \"\$(cat '$SWARM_DIR/agent-prompt.txt')\"" Enter
 
 # Focus on the PM pane
 tmux select-pane -t "$SESSION_NAME:0.0"
@@ -177,11 +193,11 @@ echo "╔═══════════════════════�
 echo "║           🐝  Claude Swarm is starting up!                  ║"
 echo "║                                                             ║"
 echo "║  Layout:                                                    ║"
-echo "║  ┌─────────────────┬─────────────────┐                     ║"
-echo "║  │ 🎯 Product Mgr  │ 🔧 Agent 1      │                     ║"
-echo "║  ├─────────────────┼─────────────────┤                     ║"
-echo "║  │ 🔧 Agent 2      │ 🔧 Agent 3      │                     ║"
-echo "║  └─────────────────┴─────────────────┘                     ║"
+echo "║  ┌──────────────────┬─────────────────┐                    ║"
+echo "║  │ >>> PRODUCT MGR  │  Code Agent 1   │                    ║"
+echo "║  ├──────────────────┼─────────────────┤                    ║"
+echo "║  │  Code Agent 2    │  Code Agent 3   │                    ║"
+echo "║  └──────────────────┴─────────────────┘                    ║"
 echo "║                                                             ║"
 echo "║  Tips:                                                      ║"
 echo "║  • Talk to the PM in the top-left pane                     ║"
