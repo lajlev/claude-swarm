@@ -1,4 +1,4 @@
-# Claude Swarm
+# Claude Agents
 
 Multi-agent Claude Code orchestrator using tmux. Spins up a **Product Manager** and **3 Code Agents** in a 2x2 grid, each running an independent Claude Code session with role-specific system prompts.
 
@@ -26,21 +26,21 @@ Multi-agent Claude Code orchestrator using tmux. Spins up a **Product Manager** 
 
 ```bash
 # Clone the repo
-git clone https://github.com/lajlev/claude-swarm.git
-cd claude-swarm
+git clone https://github.com/lajlev/claude-agents.git
+cd claude-agents
 
-# Make it available globally
-ln -sf "$(pwd)/claude-swarm.sh" /opt/homebrew/bin/claude-swarm
+# Example on how to make claude-agents available globally
+ln -sf "$(pwd)/claude-agents.sh" /opt/homebrew/bin/claude-agents
 ```
 
 ## Usage
 
 ```bash
 # Run in the current directory
-claude-swarm
+claude-agents
 
 # Run in a specific project directory
-claude-swarm ~/my-project
+claude-agents ~/my-project
 ```
 
 ## Tmux controls
@@ -50,8 +50,8 @@ claude-swarm ~/my-project
 | Switch panes | `Ctrl+B` then arrow keys |
 | Scroll a pane | `Ctrl+B` then `[` |
 | Detach session | `Ctrl+B` then `d` |
-| Reattach | `tmux attach -t claude-swarm` |
-| Kill session | `tmux kill-session -t claude-swarm` |
+| Reattach | `tmux attach -t claude-agents` |
+| Kill session | `tmux kill-session -t claude-agents` |
 
 ## License
 

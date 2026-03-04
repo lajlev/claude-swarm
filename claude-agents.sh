@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================================
-# claude-swarm.sh — Multi-agent Claude Code orchestrator in tmux
+# claude-agents.sh — Multi-agent Claude Code orchestrator in tmux
 #
 # Layout:  4 panes in one tmux window
 #   ┌──────────────┬──────────────┐
@@ -14,8 +14,8 @@
 # The 3 Code Agents run in interactive mode in their own panes.
 #
 # Usage:
-#   chmod +x claude-swarm.sh
-#   ./claude-swarm.sh [project-dir]
+#   chmod +x claude-agents.sh
+#   ./claude-agents.sh [project-dir]
 #
 # Requirements: tmux, claude (Claude Code CLI)
 # ============================================================================
@@ -25,7 +25,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-SESSION_NAME="claude-swarm"
+SESSION_NAME="claude-agents"
 PROJECT_DIR="${1:-.}"                         # default: current directory
 PROJECT_DIR="$(cd "$PROJECT_DIR" && pwd)"     # resolve to absolute path
 
@@ -37,7 +37,7 @@ AGENT_COLOR="#[fg=cyan]"
 # Note: using read -r -d '' instead of $(cat <<HEREDOC) to avoid bash 3.2
 # parser bug with parentheses inside heredocs in command substitutions.
 read -r -d '' PM_SYSTEM <<'PROMPT' || true
-You are the PRODUCT MANAGER in a multi-agent Claude Code swarm.
+You are the PRODUCT MANAGER in a multi-agent Claude Code team.
 
 ## Your role
 - You coordinate 3 Code Agents working in parallel in adjacent tmux panes.
@@ -47,9 +47,9 @@ You are the PRODUCT MANAGER in a multi-agent Claude Code swarm.
 
 ## How to communicate with agents
 Send tasks to agents by running bash commands. Always use a single one-line message followed by Enter:
-- Agent 1: tmux send-keys -t claude-swarm:0.1 "your one-line task here" Enter
-- Agent 2: tmux send-keys -t claude-swarm:0.2 "your one-line task here" Enter
-- Agent 3: tmux send-keys -t claude-swarm:0.3 "your one-line task here" Enter
+- Agent 1: tmux send-keys -t claude-agents:0.1 "your one-line task here" Enter
+- Agent 2: tmux send-keys -t claude-agents:0.2 "your one-line task here" Enter
+- Agent 3: tmux send-keys -t claude-agents:0.3 "your one-line task here" Enter
 
 Rules for sending messages:
 - ALWAYS send a single one-line message. Never multi-line.
@@ -105,7 +105,7 @@ tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
 # ---------------------------------------------------------------------------
 # Write temporary CLAUDE.md files for each role
 # ---------------------------------------------------------------------------
-SWARM_DIR="$PROJECT_DIR/.claude-swarm"
+SWARM_DIR="$PROJECT_DIR/.claude-agents"
 mkdir -p "$SWARM_DIR"
 
 printf '%s' "$PM_SYSTEM" > "$SWARM_DIR/pm-prompt.txt"
@@ -113,7 +113,7 @@ printf '%s' "$PM_SYSTEM" > "$SWARM_DIR/pm-prompt.txt"
 # Generate per-agent prompt files (each agent knows its number and how to report back)
 for AGENT_NUM in 1 2 3; do
     cat > "$SWARM_DIR/agent${AGENT_NUM}-prompt.txt" << AGENTEOF
-You are CODE AGENT ${AGENT_NUM} in a multi-agent Claude Code swarm.
+You are CODE AGENT ${AGENT_NUM} in a multi-agent Claude Code team.
 
 ## Your role
 - You receive specific, scoped coding tasks from the Product Manager.
@@ -122,10 +122,10 @@ You are CODE AGENT ${AGENT_NUM} in a multi-agent Claude Code swarm.
 
 ## Reporting back to the PM
 When you complete your task, report to the Product Manager by running:
-tmux send-keys -t claude-swarm:0.0 "AGENT ${AGENT_NUM} DONE: <one-line summary of what you did>" Enter
+tmux send-keys -t claude-agents:0.0 "AGENT ${AGENT_NUM} DONE: <one-line summary of what you did>" Enter
 
 If you are blocked and need help, report it:
-tmux send-keys -t claude-swarm:0.0 "AGENT ${AGENT_NUM} BLOCKED: <what you need>" Enter
+tmux send-keys -t claude-agents:0.0 "AGENT ${AGENT_NUM} BLOCKED: <what you need>" Enter
 
 IMPORTANT: Always use a single one-line message followed by Enter. Never multi-line.
 
@@ -215,7 +215,7 @@ tmux select-pane -t "$SESSION_NAME:0.0"
 # ---------------------------------------------------------------------------
 echo ""
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║           🐝  Claude Swarm is starting up!                  ║"
+echo "║           🐝  Claude Agents is starting up!                  ║"
 echo "║                                                             ║"
 echo "║  Layout:                                                    ║"
 echo "║  ┌──────────────────┬─────────────────┐                    ║"
@@ -229,8 +229,8 @@ echo "║  • Talk to the PM in the top-left pane                     ║"
 echo "║  • Switch panes: Ctrl+B then arrow keys                    ║"
 echo "║  • Scroll pane:  Ctrl+B then [                             ║"
 echo "║  • Detach:       Ctrl+B then d                             ║"
-echo "║  • Reattach:     tmux attach -t claude-swarm               ║"
-echo "║  • Kill all:     tmux kill-session -t claude-swarm         ║"
+echo "║  • Reattach:     tmux attach -t claude-agents              ║"
+echo "║  • Kill all:     tmux kill-session -t claude-agents        ║"
 echo "║                                                             ║"
 echo "║  The PM will only escalate critical decisions to you.       ║"
 echo "║  Look for ⚠️  ESCALATION: messages.                         ║"
